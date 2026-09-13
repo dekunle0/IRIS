@@ -1,0 +1,35 @@
+/* packages/shared-ui/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root, [data-theme="light"] {
+  --background: 0 0% 100%;
+  --foreground: 220 39% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 39% 11%;
+  --muted: 210 20% 96%;
+  --muted-foreground: 220 9% 46%;
+  --border: 220 13% 91%;
+  --ring: 158 64% 32%; /* emerald-600 */
+}
+
+[data-theme="dark"] {
+  --background: 222 47% 3%;
+  --foreground: 210 20% 98%;
+  --card: 220 39% 8%;
+  --card-foreground: 210 20% 98%;
+  --muted: 220 39% 12%;
+  --muted-foreground: 217 10% 65%;
+  --border: 220 13% 18%;
+  --ring: 158 64% 42%;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.iris-focus-ring-green {
+  animation: iris-pulse 2s ease-in-out infinite;
+}
