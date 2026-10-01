@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  font-size: 13px;
+}
+
+:root, [data-theme="light"] {
+  --glass-panel: rgba(255, 255, 255, 0.25);
+  --glass-panel-border: rgba(255, 255, 255, 0.9);
+  --glass-input: rgba(255, 255, 255, 0.15);
+  --glass-input-border: rgba(255, 255, 255, 0.6);
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --app-grad-from: #f1f5f9;
+  --app-grad-via: rgba(236, 253, 245, 0.3);
+  --app-grad-to: rgba(240, 253, 250, 0.4);
+}
+
+[data-theme="dark"] {
+  --glass-panel: rgba(30, 41, 59, 0.35);
+  --glass-panel-border: rgba(255, 255, 255, 0.1);
+  --glass-input: rgba(15, 23, 42, 0.5);
+  --glass-input-border: rgba(255, 255, 255, 0.05);
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --app-grad-from: #0f172a;
+  --app-grad-via: rgba(2, 44, 34, 0.5);
+  --app-grad-to: rgba(4, 47, 46, 0.6);
+}
+
+[data-theme="amoled"] {
+  --glass-panel: rgba(0, 0, 0, 0.4);
+  --glass-panel-border: rgba(255, 255, 255, 0.05);
+  --glass-input: rgba(255, 255, 255, 0.03);
+  --glass-input-border: rgba(255, 255, 255, 0.02);
+  --text-main: #ffffff;
+  --text-muted: #94a3b8;
+  --app-grad-from: #000000;
+  --app-grad-via: #000000;
+  --app-grad-to: #000000;
+}
+
+:root, [data-theme="light"] {
+  --background: 0 0% 100%;
+  --foreground: 220 39% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 39% 11%;
+  --muted: 210 20% 96%;
+  --muted-foreground: 220 9% 46%;
+  --border: 220 13% 91%;
+  --ring: 158 64% 32%;
+  --iris-ink: #17211f;
+  --iris-paper: #f4f7f5;
+  --iris-mint: #dcefe7;
+  --iris-line: #d8e2dd;
+}
+
+[data-theme="dark"] {
+  --background: 222 47% 3%;
+  --foreground: 210 20% 98%;
+  --card: 220 39% 8%;
+  --card-foreground: 210 20% 98%;
+  --muted: 220 39% 12%;
+  --muted-foreground: 217 10% 65%;
+  --border: 220 13% 18%;
+  --ring: 158 64% 42%;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  min-width: 320px;
+  background-color: var(--iris-paper);
+  color: var(--iris-ink);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+h1, h2, h3, h4 {
+  letter-spacing: 0;
+}
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 3px solid rgba(5, 150, 105, 0.25);
+  outline-offset: 2px;
+}
+
+.iris-surface {
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--iris-line);
+  box-shadow: 0 18px 45px rgba(31, 55, 46, 0.06);
+}
+
+.iris-focus-ring-green {
+  animation: iris-pulse 2s ease-in-out infinite;
+}
+
+@keyframes slideUpFade {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+@keyframes fadeInBlur {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.animate-fade-in-blur {
+  animation: fadeInBlur 0.5s ease-out forwards;
+  will-change: opacity;
+}

@@ -1,0 +1,37 @@
+{
+  "name": "iris-platform",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "pnpm --dir apps/desktop dev --host localhost --strictPort",
+    "test": "vitest run",
+    "typecheck": "pnpm -r exec tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "9.15.4",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@9.15.4",
+  "type": "module",
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "turbo": "^2.1.2",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  },
+  "dependencies": {
+    "framer-motion": "^11.5.6",
+    "lucide-react": "^0.453.0",
+    "qrcode": "^1.5.4"
+  }
+}
