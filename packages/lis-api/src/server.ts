@@ -98,7 +98,6 @@ if (keyHex) {
   db.pragma(`key="x'${keyHex}'"`);
 } else {
   // No readable key: attempt to open as plaintext (dev/test without encryption).
-  // If the DB is encrypted this will throw at the schema check below and exit.
   console.warn(
     '[LIS API] WARNING: iris.key not readable as plaintext hex. ' +
     'If the database is SQLCipher-encrypted this process will exit. ' +
@@ -121,7 +120,6 @@ try {
   app.log.error('Failed to open database. It may be encrypted or absent: ' + e.message);
   process.exit(1);
 }
-
 
 // IRIS-H-137: Bypass auth for health endpoint by registering it BEFORE bearer plugin
 app.get('/v1/health', async () => {

@@ -131,7 +131,6 @@ function createWindow() {
 
   // IRIS-H-185
   mainWindow.on('closed', () => {
-    // Window reference cleanup
   });
 
   if (!app.isPackaged) {

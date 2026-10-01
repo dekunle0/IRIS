@@ -72,7 +72,6 @@ class PdfContext {
     this.pageNum++;
     this.Y = this.height - this.ML;
 
-    // Draw header on new page
     this.drawHeader();
   }
 
@@ -105,10 +104,8 @@ class PdfContext {
       const p = pages[i];
       const footerY = 70;
       
-      // Horizontal line
       p.drawLine({ start: { x: this.ML, y: footerY }, end: { x: this.MR, y: footerY }, thickness: 1, color: C.slate100 });
 
-      // Legal footer
       const legal =
         'This report is generated and stored exclusively on the issuing institution\'s local system. ' +
         'It contains clinically sensitive information protected under the Nigerian Data Protection Regulation (NDPR) 2019 and the Health Records and Information Management Act. ' +
@@ -122,7 +119,6 @@ class PdfContext {
         x: this.ML, y: 8, size: 6, font: this.bf, color: C.emerald
       });
 
-      // Page numbers
       const pageText = `Page ${i + 1} of ${pages.length}`;
       p.drawText(pageText, {
         x: this.MR - this.font.widthOfTextAtSize(pageText, 8),
@@ -136,7 +132,6 @@ class PdfContext {
     let currentLine = '';
     const words = text.split(/\s+/);
     
-    // Check if a single word is too long, break it by characters
     for (let i = 0; i < words.length; i++) {
       const word = words[i];
       if (activeFont.widthOfTextAtSize(word, size) > maxW) {
@@ -182,13 +177,11 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit(fontkit);
   
-  // Use a local unicode font (Arial) to support Nigerian diacritics
   let fontBytes: Buffer | undefined, bfBytes: Buffer | undefined;
   try {
     fontBytes = fs.readFileSync('C:\\Windows\\Fonts\\arial.ttf');
     bfBytes = fs.readFileSync('C:\\Windows\\Fonts\\arialbd.ttf');
   } catch {
-    // Fallback to standard fonts if filesystem access fails
     console.warn("Arial TTF not found, falling back to Helvetica");
   }
 
@@ -204,7 +197,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
   };
   const nl = () => { ctx.ML = 45; ctx.Y -= 30; };
 
-  // Patient Info
   const maskedNin = resultData.nin ? `****-${resultData.nin.slice(-4)}` : '—';
   const age = computeAge(resultData.dob);
   
@@ -221,7 +213,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
   ctx.page.drawLine({ start: { x: ctx.ML, y: ctx.Y }, end: { x: ctx.MR, y: ctx.Y }, thickness: 1, color: C.slate100 });
   ctx.Y -= 15;
 
-  // Request Info
   field('TEST CATEGORY', resultData.test_category || 'Haematology');
   field('REQUESTING CLINICIAN', resultData.requesting_clinician || '—', 150);
   field('WARD/CLINIC', resultData.ward_clinic || '—', 100);
@@ -235,7 +226,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
   ctx.page.drawLine({ start: { x: ctx.ML, y: ctx.Y }, end: { x: ctx.MR, y: ctx.Y }, thickness: 1, color: C.slate100 });
   ctx.Y -= 20;
 
-  // Methodology
   ctx.page.drawText('METHODOLOGY', { x: ctx.ML, y: ctx.Y, size: 9, font: ctx.bf, color: C.slate900 });
   ctx.Y -= 14;
   const method = `Automated digital microscopy with AI-assisted cell classification (IRIS v${resultData.modelVersion || '1.0.0'}). `
@@ -244,7 +234,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
   ctx.drawWrapped(method, ctx.ML, ctx.CW, 13, 9, C.slate700);
   ctx.Y -= 10;
 
-  // Quantitative Findings Table
   let ranges: any[] = [];
   if (resultData.reference_ranges) {
     try { ranges = JSON.parse(resultData.reference_ranges); } catch (e) {}
@@ -257,7 +246,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
     ctx.page.drawText('QUANTITATIVE FINDINGS', { x: ctx.ML, y: ctx.Y, size: 9, font: ctx.bf, color: C.slate900 });
     ctx.Y -= 16;
     
-    // Table Header
     ctx.page.drawRectangle({ x: ctx.ML, y: ctx.Y - 4, width: ctx.CW, height: 16, color: C.slate100 });
     ctx.page.drawText('ANALYTE', { x: ctx.ML + 10, y: ctx.Y, size: 7, font: ctx.bf, color: C.slate500 });
     ctx.page.drawText('RESULT', { x: ctx.ML + 180, y: ctx.Y, size: 7, font: ctx.bf, color: C.slate500 });
@@ -288,7 +276,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
     ctx.Y -= 10;
   }
 
-  // AI Confidence
   ctx.checkPage(50);
   let confPct = 0;
   try {
@@ -306,7 +293,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
   );
   ctx.Y -= 30;
 
-  // FOV Images
   const fovImages: string[] = Array.isArray(resultData.frameImages) ? resultData.frameImages.slice(0, 3) : [];
   if (fovImages.length > 0) {
     ctx.checkPage(180);
@@ -328,7 +314,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
         } else if (src.startsWith('data:image/png')) {
           embeddedImg = await pdfDoc.embedPng(Buffer.from(b64Data, 'base64'));
         } else if (src.startsWith('data:image/webp')) {
-          // Convert to PNG placeholder if webp isn't natively supported, 
           // or ideally convert via sharp/canvas. For now, since pdf-lib doesn't do WebP natively,
           // we embed a simple square indicating "WebP image omitted".
           // If we had canvas we could convert. To not crash, we skip WebP silently in base pdf-lib
@@ -347,7 +332,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
     ctx.Y -= imgH + 16;
   }
 
-  // Clinical Narrative
   ctx.checkPage(120);
   ctx.page.drawLine({ start: { x: ctx.ML, y: ctx.Y }, end: { x: ctx.MR, y: ctx.Y }, thickness: 1, color: C.slate100 });
   ctx.Y -= 18;
@@ -356,7 +340,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
   ctx.drawWrapped(resultData.editedFindings || 'No findings reported.', ctx.ML, ctx.CW, 14, 10, C.slate900);
   ctx.Y -= 16;
 
-  // Interpretive Comment
   if (resultData.comments) {
     ctx.checkPage(80);
     ctx.page.drawText('INTERPRETIVE COMMENT', { x: ctx.ML, y: ctx.Y, size: 9, font: ctx.bf, color: C.slate900 });
@@ -368,7 +351,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
   // Ensure there's space for authorization & signature (which take ~80 units)
   ctx.checkPage(100);
 
-  // Print auth footer
   const authY = ctx.Y - 20;
   ctx.page.drawText('AUTHORIZED BY', { x: ctx.ML, y: authY, size: 7, font: ctx.bf, color: C.slate500 });
   ctx.page.drawText(resultData.approvedByName || 'Authorized Personnel', { x: ctx.ML, y: authY - 14, size: 11, font: ctx.bf, color: C.slate900 });
@@ -379,7 +361,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
     ctx.page.drawText(`MLSCN Reg: ${resultData.mlscnNumber}`, { x: ctx.ML, y: authY - 40, size: 8, font: ctx.bf, color: C.slate700 });
   }
 
-  // Signature image
   if (resultData.signatureData) {
     try {
       const b64 = resultData.signatureData.split(',')[1];
@@ -396,10 +377,8 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
         finalW = maxHeight * aspect;
       }
       ctx.page.drawImage(sigImg, { x: ctx.ML, y: authY - 45, width: finalW, height: finalH });
-    } catch { /* no signature */ }
   }
 
-  // QR code
   try {
     const qrPayload = buildSignedQRPayload({
       ref: resultData.verificationCode || '',
@@ -412,7 +391,6 @@ export async function generateLocalPDF(resultData: any): Promise<string> {
     const qrImg = await pdfDoc.embedPng(Buffer.from(qrDataUrl.split(',')[1], 'base64'));
     ctx.page.drawImage(qrImg, { x: ctx.MR - 85, y: authY - 50, width: 85, height: 85 });
     ctx.page.drawText('SCAN TO VERIFY', { x: ctx.MR - 80, y: authY - 55, size: 6.5, font: ctx.bf, color: C.slate500 });
-  } catch { /* QR failed */ }
 
   ctx.drawFooter();
 

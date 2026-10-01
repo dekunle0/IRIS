@@ -92,7 +92,6 @@ export function registerDeviceHandlers() {
 
     const signature = await fs.promises.readFile(sigPath);
     
-    // Fallback to bundled RSA public key if missing
     const publicKey = process.env.IRIS_FIRMWARE_PUBLIC_KEY || `-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1h9tVB60YlSeV+v7TdcB
 WOd1FmeVWpjtI9+AbCFGBLqE7CF7k3yz4strnfhVzD63u+CMirAziIjAHlx4kIHc

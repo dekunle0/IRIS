@@ -12,6 +12,5 @@ export async function verifyPassword(hash: string, plainText: string): Promise<b
 
 export function needsRehash(hash: string): boolean {
   // Bcrypt hashes start with algorithm and cost, e.g., $2a$10$ or $2b$10$
-  // If the cost factor is not 10, it needs a rehash
   return !hash.startsWith('$2a$10$') && !hash.startsWith('$2b$10$');
 }

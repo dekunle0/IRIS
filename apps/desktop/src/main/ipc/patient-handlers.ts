@@ -39,7 +39,6 @@ export function registerPatientHandlers() {
       const ninEncrypted = encryptField(patientData.nin || null);
       const chronicEncrypted = encryptField(patientData.chronicFlags || null);
 
-      // Save encrypted signature to disk
       const sigBuffer = Buffer.from(patientData.signatureData.split(',')[1], 'base64');
       const sigPath = path.join(app.getPath('userData'), `sig_patient_${id}.png.enc`);
       fs.writeFileSync(sigPath, encryptBuffer(sigBuffer));
@@ -52,7 +51,6 @@ export function registerPatientHandlers() {
       let successData: any = null;
       
       db.transaction(() => {
-        // Atomic duplicate phone check
         const duplicatePhone = db.prepare('SELECT patient_code FROM patients WHERE phone = ? AND institution_id = ?').get(phone, session.institutionId) as any;
         if (duplicatePhone) throw new Error(`This phone number is already registered to patient ${duplicatePhone.patient_code}.`);
 
@@ -91,7 +89,6 @@ export function registerPatientHandlers() {
         ? (session.role === 'admin' ? ninPlain : `***-***-${ninPlain.slice(-4)}`)
         : null;
 
-      // Decrypt chronic flags
       const chronicFlags = decryptField(patient.chronic_flags_encrypted);
 
       return { success: true, data: { ...patient, nin: ninMasked, chronic_flags: chronicFlags, nin_encrypted: undefined, chronic_flags_encrypted: undefined } };

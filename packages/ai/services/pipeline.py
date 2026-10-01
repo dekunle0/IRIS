@@ -27,7 +27,6 @@ def get_session():
             print(f"\n CRITICAL: Physical ONNX Model not found at {MODEL_PATH}.")
             return None
         
-        # Calculate checksum for provenance (IRIS-H-084)
         with open(MODEL_PATH, "rb") as f:
             _model_checksum = hashlib.sha256(f.read()).hexdigest()
             
