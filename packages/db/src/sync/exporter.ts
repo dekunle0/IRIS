@@ -13,8 +13,24 @@ export function exportSince(db: Database.Database, lastSyncTimestamp: string) {
   });
 
   // Generate a detached signature (simulated Ed25519 using HMAC for Phase 1)
-  const secret = process.env.IRIS_SYNC_SECRET || 'offline-sync-key';
-  const signature = crypto.createHmac('sha256', secret).update(exportPackage).digest('hex');
+  const secret = process.env.IRIS_SYNC_SECRET;
+  if (!secret) {
+    throw new Error('CRITICAL: IRIS_SYNC_SECRET environment variable is unset. Backup aborted to prevent unauthenticated data export.');
+  }
+  // Encrypt the entire package to protect PHI
+  const iv = crypto.randomBytes(12);
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv) as crypto.CipherGCM;
+  const encrypted = Buffer.concat([cipher.update(exportPackage, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
 
-  return { payload: exportPackage, signature };
+  const securePayload = JSON.stringify({
+    iv: iv.toString('hex'),
+    tag: tag.toString('hex'),
+    ciphertext: encrypted.toString('hex')
+  });
+
+  const signature = crypto.createHmac('sha256', secret).update(securePayload).digest('hex');
+
+  return { payload: securePayload, signature };
 }

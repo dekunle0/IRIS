@@ -1,81 +1,157 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { DotLoader } from './DotLoader';
+import { CircularTelemetryQueue } from '../utils/algorithms';
 
-export function CaptureScreen() {
+export function CaptureScreen({ currentUser }: { currentUser?: any }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [deviceStatus, setDeviceStatus] = useState({ connected: false, battery: 0, storageGb: 0 });
   const [focusScore, setFocusScore] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  
   const [aiStage, setAiStage] = useState<string | null>(null);
-  const [hasAutoStarted, setHasAutoStarted] = useState(false);
+  const [analysisComplete, setAnalysisComplete] = useState(false);
+  
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+  const [selectedRequestId, setSelectedRequestId] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [globalError, setGlobalError] = useState<string>('');
 
-  // Playbook Requirement: Color states based on score
+  const focusSmoother = useMemo(() => new CircularTelemetryQueue(10), []);
+
+  useEffect(() => {
+    const fetchWorklist = async () => {
+      if (window.electron) {
+        const res = await window.electron.ipcRenderer.invoke('worklist:getPending');
+        if (res.success) {
+          const pending = res.data;
+          setPendingRequests(pending);
+          if (pending.length > 0) {
+            setSelectedRequestId(pending[0].requestId);
+            setSearchQuery(pending[0].patientCode + ' - ' + pending[0].patientName);
+          }
+        }
+      }
+    };
+    fetchWorklist();
+  }, []);
+
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const recordedChunks = useRef<Blob[]>([]);
+  const captureInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const getFocusColorClass = () => {
-    if (focusScore < 40) return 'border-error';
-    if (focusScore <= 75) return 'border-warning';
-    return 'border-[#059669] iris-focus-ring-green shadow-[0_0_30px_rgba(5,150,105,0.4)]'; 
+    if (focusScore < 40) return 'border-red-500';
+    if (focusScore <= 75) return 'border-amber-500';
+    return 'border-emerald-500 shadow-[0_0_30px_rgba(5,150,105,0.4)]'; 
   };
 
   const connectMockDevice = async () => {
+    setGlobalError('');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      if (videoRef.current) videoRef.current.srcObject = stream;
       setDeviceStatus({ connected: true, battery: 85, storageGb: 42 });
-      setFocusScore(15); 
-      setHasAutoStarted(false);
+      setFocusScore(0);
+      
+      // Real time blur detection (focus score proxy)
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (ctx) {
+        captureInterval.current = setInterval(() => {
+          if (!videoRef.current || videoRef.current.readyState < 2) return;
+          canvas.width = videoRef.current.videoWidth;
+          canvas.height = videoRef.current.videoHeight;
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          
+          // Compute Tenengrad sharpness (gradient magnitude) on luma channel
+          const data = imageData.data;
+          const width = canvas.width;
+          const height = canvas.height;
+          let totalGradient = 0;
+          let count = 0;
+          
+          // Fast luma approximation and gradient calculation, skipping edges
+          for (let y = 1; y < height - 1; y += 2) {
+            for (let x = 1; x < width - 1; x += 2) {
+              const i = (y * width + x) * 4;
+              const lumaC = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
+              const lumaR = data[i+4]*0.299 + data[i+5]*0.587 + data[i+6]*0.114;
+              const lumaB = data[i+width*4]*0.299 + data[i+width*4+1]*0.587 + data[i+width*4+2]*0.114;
+              
+              const dx = lumaR - lumaC;
+              const dy = lumaB - lumaC;
+              const gradSquared = dx*dx + dy*dy;
+              
+              // Only count significant edges to avoid noise inflating the score
+              if (gradSquared > 100) {
+                totalGradient += gradSquared;
+              }
+              count++;
+            }
+          }
+          
+          // Average gradient energy
+          const avgGradient = totalGradient / Math.max(1, count);
+          
+          // Map to 0-100 using a calibrated curve. 
+          // An average webcam might peak around 1500-2500 on sharp edges.
+          // We use an asymptotic curve so it approaches 100 smoothly.
+          const maxExpectedGradient = 2500;
+          const rawScore = Math.min(100, Math.max(0, (avgGradient / maxExpectedGradient) * 100));
+          setFocusScore(focusSmoother.enqueue(rawScore));
+        }, 500);
+      }
     } catch (err) {
-      alert("Hardware connection failed (webcam access denied).");
+      setGlobalError("Hardware connection failed: Camera access denied or device unavailable.");
     }
   };
 
   const disconnectDevice = () => {
-    // Properly release the webcam hardware
+    if (captureInterval.current) {
+      clearInterval(captureInterval.current);
+      captureInterval.current = null;
+    }
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.stop();
+    }
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
-    
-    // Reset all states
     setDeviceStatus({ connected: false, battery: 0, storageGb: 0 });
     setFocusScore(0);
     setIsRecording(false);
     setRecordingTime(0);
-    setHasAutoStarted(false);
     setAiStage(null);
   };
 
-  // 1. Realistic Hardware Auto-Focus Simulator
   useEffect(() => {
-    let focusTimeout: ReturnType<typeof setTimeout>;
-    
-    if (deviceStatus.connected && !isRecording && !aiStage && focusScore < 82) {
-      focusTimeout = setTimeout(() => {
-        setFocusScore(prev => {
-          const jump = Math.random() > 0.15 ? Math.floor(Math.random() * 6) + 2 : -2;
-          const next = Math.max(0, prev + jump);
-          return next > 82 ? 82 : next; 
-        });
-      }, 350); 
-    }
-    
-    return () => clearTimeout(focusTimeout);
-  }, [deviceStatus.connected, isRecording, aiStage, focusScore]);
+    // Cleanup on unmount
+    return () => disconnectDevice();
+  }, []);
 
-  // 2. Playbook Requirement: Auto-start capture when Green (>75%) is reached
   useEffect(() => {
-    if (focusScore <= 75) {
-      setHasAutoStarted(false);
-    } else if (focusScore > 75 && deviceStatus.connected && !isRecording && !aiStage && !hasAutoStarted) {
-      setIsRecording(true);
-      setHasAutoStarted(true);
+    if (focusScore > 75 && deviceStatus.connected && !isRecording && !aiStage && !analysisComplete) {
+      // Auto-trigger recording when focus crosses threshold
+      if (videoRef.current && videoRef.current.srcObject) {
+        setIsRecording(true);
+        recordedChunks.current = [];
+        const stream = videoRef.current.srcObject as MediaStream;
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        mediaRecorder.current = recorder;
+        
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) recordedChunks.current.push(e.data);
+        };
+        recorder.start();
+      }
     }
-  }, [focusScore, deviceStatus.connected, isRecording, aiStage, hasAutoStarted]);
+  }, [focusScore, deviceStatus.connected, isRecording, aiStage]);
 
-  // 3. Handle the recording timer
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
     if (isRecording) {
@@ -83,130 +159,148 @@ export function CaptureScreen() {
     } else {
       setRecordingTime(0);
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, [isRecording]);
 
-  const startAiPipeline = async () => {
-    const stages = [
-      "Extracting frames",
-      "Segmenting cells",
-      "Classifying morphology",
-      "Generating report"
-    ];
-    let currentStage = 0;
-    
-    setAiStage(stages[currentStage]);
-    const loaderInterval = setInterval(() => {
-      currentStage = Math.min(currentStage + 1, stages.length - 1);
-      setAiStage(stages[currentStage]);
-    }, 1500);
+  const startAiPipeline = async (videoPath: string) => {
+    setGlobalError('');
+    if (!selectedRequestId) {
+      setGlobalError('Please select a patient test first.');
+      return;
+    }
 
-    const completeAnalysis = () => {
-      clearInterval(loaderInterval);
-      setAiStage(null);
-      // Reset the focus to simulate a new slide being placed
-      setFocusScore(15);
-      setHasAutoStarted(false);
-    };
+    setAiStage("Analyzing slide...");
+    setAnalysisComplete(false);
 
     try {
       if (window.electron) {
+        const selectedReq = pendingRequests.find(r => r.requestId === selectedRequestId);
+        
+        let ageInYears: number | undefined = undefined;
+        if (selectedReq?.patientDob) {
+          const diffDays = Math.floor((Date.now() - new Date(selectedReq.patientDob).getTime()) / (1000 * 60 * 60 * 24));
+          ageInYears = Math.floor(diffDays / 365);
+        }
+        
         const response = await window.electron.ipcRenderer.invoke('ai:analyze', {
-          captureId: `cap-${Date.now()}`,
-          videoPath: '/local/captures/vid_active.mp4',
-          testType: 'Malaria Parasite',
-          patientContext: { age: 35, gender: 'Male' }
+          testRequestId: selectedRequestId,
+          videoPath: videoPath,
+          testType: selectedReq?.testName || 'Malaria Parasite',
+          patientContext: { age: ageInYears, gender: selectedReq?.patientGender || 'Unknown' },
+          userId: currentUser?.id
         });
-        completeAnalysis();
-        if (response.success) alert("Local AI Analysis Complete! Result securely saved.");
-      } else {
-        setTimeout(() => {
-          completeAnalysis();
-          alert("[Browser Mode] Simulated AI Analysis Complete!");
-        }, 6000);
+
+        if (response.success) {
+          setAnalysisComplete(true);
+        } else {
+          setGlobalError(`Analysis failed: ${response.error}`);
+        }
       }
     } catch (err) {
-      completeAnalysis();
-      alert("Failed to communicate with Electron Main Process.");
+      setGlobalError("System encountered an error communicating with the analysis engine.");
+    } finally {
+      setAiStage(null);
     }
   };
 
   const handleStopRecording = () => {
-    if (recordingTime < 15) {
-      const confirm = window.confirm("Warning: Capture is under 15 seconds. This may result in low AI confidence. Stop anyway?");
-      if (!confirm) return;
-    }
     setIsRecording(false);
-    startAiPipeline();
+    if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+      mediaRecorder.current.onstop = async () => {
+        const blob = new Blob(recordedChunks.current, { type: 'video/webm' });
+        const arrayBuffer = await blob.arrayBuffer();
+        if (window.electron) {
+          const res = await window.electron.ipcRenderer.invoke('ai:saveLiveCapture', arrayBuffer);
+          if (res.success) {
+            startAiPipeline(res.filePath);
+          } else {
+            setGlobalError('Failed to save captured video.');
+          }
+        }
+      };
+      mediaRecorder.current.stop();
+    }
   };
 
-  const handleManualUpload = () => {
-    alert("Opening native file picker to import video into local encrypted store (No cloud upload).");
-    startAiPipeline();
+  const handleManualUpload = async () => {
+    setGlobalError('');
+    if (window.electron) {
+      const filePath = await window.electron.ipcRenderer.invoke('dialog:openVideo');
+      if (filePath) startAiPipeline(filePath);
+    }
   };
 
   const blurAmount = Math.max(0, (80 - focusScore) / 8);
 
+  const filteredRequests = pendingRequests.filter(req => 
+    req.patientName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (req.patientCode && req.patientCode.toLowerCase().includes(searchQuery.toLowerCase()))
+  ).slice(0, 50);
+
   return (
-    <div className="max-w-7xl mx-auto w-full font-sans pb-10">
-      <div className="flex justify-between items-end mb-8">
+    <div className="h-full flex flex-col font-sans relative pb-10">
+      <div className="flex justify-between items-end mb-8 animate-slide-up">
         <div>
-          <h2 className="text-4xl font-extrabold text-slate-800 tracking-tight">Capture Feed</h2>
-          <p className="text-lg text-slate-500 mt-2 font-medium">Live from IRIS Eyepiece</p>
+          <h1 className="text-3xl font-extrabold text-app-text tracking-tight">Microscope feed</h1>
+          <p className="text-base text-app-muted mt-1 font-medium">Capture slide images and analyze.</p>
         </div>
 
-        <div className="flex gap-6 items-center bg-white px-6 py-3 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="flex gap-6 items-center bg-white px-6 py-3.5 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-3">
-            <span className={`h-4 w-4 rounded-full shadow-inner ${deviceStatus.connected ? 'bg-[#059669]' : 'bg-slate-300'}`}></span>
-            <span className="text-base font-bold text-slate-700">{deviceStatus.connected ? 'IRIS-001 Connected' : 'No Device'}</span>
+            <span className={`h-4 w-4 rounded-full shadow-inner ${deviceStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></span>
+            <span className="text-base font-bold text-app-text">{deviceStatus.connected ? 'System Camera (Mock Mode)' : 'No Hardware Detected'}</span>
           </div>
           {deviceStatus.connected && (
-            <>
-              <div className="text-base font-medium text-slate-500 border-l border-slate-200 pl-6">🔋 {deviceStatus.battery}%</div>
-              <div className="text-base font-medium text-slate-500 border-l border-slate-200 pl-6">💾 {deviceStatus.storageGb}GB Free</div>
-              <button 
-                onClick={disconnectDevice} 
-                className="ml-2 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 text-sm font-bold rounded-lg transition-colors border border-red-100"
-              >
-                Disconnect
-              </button>
-            </>
+            <button onClick={disconnectDevice} className="ml-2 px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 font-bold rounded-xl transition-colors border border-red-100">
+              Disconnect
+            </button>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-12 gap-8">
-        {/* Main Camera Viewport */}
-        <div className="col-span-8 relative aspect-[16/9] bg-slate-900 rounded-3xl shadow-xl border border-slate-800 overflow-hidden flex items-center justify-center">
+      {globalError && (
+        <div className="mb-6 p-5 bg-red-50/90 backdrop-blur-md border border-red-200 text-red-800 rounded-2xl text-sm font-bold flex items-center gap-3 shadow-sm animate-slide-up">
+          <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" /></svg>
+          {globalError}
+        </div>
+      )}
+
+      <div className="grid grid-cols-12 gap-8 mt-6">
+        <div className="col-span-8 relative aspect-[16/9] bg-slate-900 rounded-[40px] shadow-[0_8px_30px_rgb(0,0,0,0.1)] border-4 border-slate-800 overflow-hidden flex items-center justify-center animate-slide-up" style={{ animationDelay: '0.1s' }}>
           
           <video 
             ref={videoRef} 
-            autoPlay 
-            playsInline 
-            muted 
+            autoPlay playsInline muted 
             className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
-            style={{ 
-              opacity: deviceStatus.connected ? 1 : 0,
-              filter: `blur(${blurAmount}px)`,
-              transform: 'scale(1.05)'
-            }}
+            style={{ opacity: deviceStatus.connected ? 1 : 0, filter: `blur(${blurAmount}px)`, transform: 'scale(1.05)' }}
           />
           
           {aiStage && (
-            <div className="absolute inset-0 bg-white/90 backdrop-blur-md flex flex-col items-center justify-center z-30">
+            <div className="absolute inset-0 bg-white/90 backdrop-blur-md flex flex-col items-center justify-center z-30 animate-fade-in-blur">
               <DotLoader stage={aiStage} />
             </div>
           )}
 
-          {deviceStatus.connected && !aiStage && (
-            <div className={`absolute inset-6 border-[8px] rounded-2xl transition-all duration-300 pointer-events-none z-20 ${getFocusColorClass()}`}>
-              <div className="absolute top-6 right-6 bg-black/70 backdrop-blur-md text-white px-4 py-2 rounded-lg font-mono text-lg font-bold shadow-lg transition-colors">
+          {analysisComplete && !aiStage && (
+            <div className="absolute inset-0 bg-emerald-900/95 backdrop-blur-md flex flex-col items-center justify-center z-30 animate-fade-in-blur text-white p-10 text-center">
+              <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(16,185,129,0.5)]">
+                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+              </div>
+              <h3 className="text-4xl font-black mb-2 tracking-tight">Analysis complete</h3>
+              <p className="text-emerald-200 text-lg font-medium mb-10">Slide analyzed successfully.</p>
+              <button onClick={() => { setAnalysisComplete(false); setFocusScore(0); }} className="px-10 py-5 bg-white text-emerald-900 font-extrabold text-lg rounded-2xl hover:bg-emerald-50 transition-all shadow-lg hover:-translate-y-1">
+                Capture next slide
+              </button>
+            </div>
+          )}
+
+          {deviceStatus.connected && !aiStage && !analysisComplete && (
+            <div className={`absolute inset-6 border-[6px] rounded-2xl transition-all duration-300 pointer-events-none z-20 ${getFocusColorClass()}`}>
+              <div className="absolute top-6 right-6 bg-slate-900/80 backdrop-blur-md text-white px-5 py-2.5 rounded-xl font-mono text-lg font-bold shadow-lg border border-slate-700">
                 FOCUS: {focusScore}%
               </div>
               {isRecording && (
-                <div className="absolute top-6 left-6 bg-error text-white px-4 py-2 rounded-lg font-mono text-lg font-bold shadow-lg animate-pulse flex items-center gap-2">
+                <div className="absolute top-6 left-6 bg-red-600 text-white px-5 py-2.5 rounded-xl font-mono text-lg font-bold shadow-lg animate-pulse flex items-center gap-3">
                   <div className="w-3 h-3 bg-white rounded-full"></div>
                   REC {Math.floor(recordingTime / 60).toString().padStart(2, '0')}:{(recordingTime % 60).toString().padStart(2, '0')}
                 </div>
@@ -214,69 +308,102 @@ export function CaptureScreen() {
             </div>
           )}
 
-          {!deviceStatus.connected && !aiStage && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-900/60 z-20">
-              <button onClick={connectMockDevice} className="px-8 py-4 bg-[#059669] text-white text-lg font-bold rounded-xl shadow-lg hover:bg-[#047857] hover:scale-105 transition-all">
-                Connect Local Device
-              </button>
+          {!deviceStatus.connected && !aiStage && !analysisComplete && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80 z-20 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-4">
+                <button onClick={connectMockDevice} className="px-10 py-5 bg-emerald-600 text-white text-lg font-black rounded-2xl hover:bg-emerald-500 shadow-[0_8px_20px_rgba(5,150,105,0.25)] transition-all hover:-translate-y-1">
+                  Connect Camera (Mock Mode)
+                </button>
+                <p className="text-slate-400 font-medium text-sm">IRIS eyepiece hardware bridge is not yet implemented.</p>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Sidebar Controls */}
-        <div className="col-span-4 flex flex-col gap-6">
-          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-6">
-            <h3 className="text-xl font-extrabold text-slate-800 border-b border-slate-100 pb-4">Capture Controls</h3>
+        <div className="col-span-4 flex flex-col gap-6 animate-slide-up" style={{ animationDelay: '0.2s' }}>
+          
+          <div className="relative z-50 bg-glass-panel p-8 rounded-[40px] border border-glass-panelBorder shadow-[0_24px_60px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.04)] flex flex-col gap-5 isolation-auto" style={{ transform: "translateZ(100px)" }}>
+            <h3 className="text-xl font-black text-app-text border-b border-slate-200/50 pb-4 tracking-tight">Select patient</h3>
+            
+            {pendingRequests.length === 0 ? (
+              <div className="p-5 bg-amber-50/80 backdrop-blur-md border border-amber-200/60 text-amber-800 rounded-2xl text-sm font-bold leading-relaxed">
+                Worklist is currently empty. Please register a patient first.
+              </div>
+            ) : (
+              <div className="relative group">
+                <label className="block text-[11px] font-bold text-app-muted mb-2 uppercase tracking-widest ml-1">Search & Select Patient</label>
+                <div className="relative">
+                  <input 
+                    type="text"
+                    placeholder="Type patient code or name..."
+                    value={searchQuery}
+                    onChange={e => { setSearchQuery(e.target.value); setIsDropdownOpen(true); }}
+                    onFocus={() => setIsDropdownOpen(true)}
+                    onBlur={() => setTimeout(() => setIsDropdownOpen(false), 200)}
+                    className="w-full pl-6 pr-12 py-4 text-base font-bold text-slate-800 bg-white/40 border border-white/60 rounded-full outline-none focus:ring-0 focus:outline-none focus:border-white transition-all placeholder:text-slate-500 shadow-[inset_0_2px_8px_rgba(255,255,255,0.3)] backdrop-blur-xl"
+                  />
+                  <div className="absolute inset-y-0 right-5 flex items-center pointer-events-none text-slate-500">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                  </div>
+                  {isDropdownOpen && filteredRequests.length > 0 && (
+                    <div className="absolute top-[calc(100%+8px)] left-0 w-full bg-white/90 backdrop-blur-3xl rounded-[24px] shadow-[0_24px_50px_rgba(0,0,0,0.15)] border border-white/60 overflow-hidden z-[9999]" style={{ transform: "translateZ(999px)", isolation: "isolate" }}>
+                      <div className="max-h-[300px] overflow-y-auto custom-scrollbar p-2 space-y-1">
+                        {filteredRequests.map(req => (
+                          <div 
+                            key={req.requestId}
+                            onClick={() => { 
+                              setSelectedRequestId(req.requestId); 
+                              setSearchQuery(req.patientCode + ' - ' + req.patientName); 
+                              setIsDropdownOpen(false); 
+                            }}
+                            className="px-5 py-4 bg-transparent hover:bg-white rounded-[16px] cursor-pointer transition-colors border-b border-slate-100 last:border-0"
+                          >
+                            <div className="text-sm font-extrabold text-slate-800">{req.patientCode} - {req.patientName}</div>
+                            <div className="text-xs font-bold text-slate-500 mt-1 uppercase tracking-wider">{req.testName}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-glass-panel p-8 rounded-[40px] border border-glass-panelBorder shadow-[0_24px_60px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.04)] flex flex-col gap-6">
+            <h3 className="text-xl font-black text-app-text border-b border-slate-200/50 pb-4 tracking-tight">Microscope feed</h3>
             
             {!isRecording ? (
               <button
-                disabled={!deviceStatus.connected || focusScore < 76 || !!aiStage}
+                disabled={!deviceStatus.connected || focusScore < 76 || !!aiStage || !selectedRequestId}
                 onClick={() => setIsRecording(true)}
-                className={`w-full py-5 rounded-xl font-extrabold text-lg text-white transition-all shadow-md ${
-                  !deviceStatus.connected || focusScore < 76 || !!aiStage
-                    ? 'bg-slate-300 cursor-not-allowed shadow-none'
-                    : 'bg-[#059669] hover:bg-[#047857] hover:shadow-lg hover:-translate-y-0.5 cursor-pointer'
+                className={`w-full py-5 rounded-2xl font-black text-lg text-white transition-all ${
+                  !deviceStatus.connected || focusScore < 76 || !!aiStage || !selectedRequestId
+                    ? 'bg-slate-300/80 cursor-not-allowed text-app-muted'
+                    : 'bg-emerald-600 shadow-[0_8px_20px_rgba(5,150,105,0.25)] hover:shadow-[0_12px_24px_rgba(5,150,105,0.35)] hover:bg-emerald-500 hover:-translate-y-1'
                 }`}
               >
-                {focusScore > 0 && focusScore <= 75 ? 'Waiting for focus...' : 'Start Capture'}
+                Start capture
               </button>
             ) : (
               <button
                 onClick={handleStopRecording}
-                className="w-full py-5 rounded-xl font-extrabold text-lg text-white bg-error hover:bg-red-700 animate-pulse shadow-lg cursor-pointer"
+                className="w-full py-5 rounded-2xl font-black text-lg text-white bg-red-600 hover:bg-red-500 animate-pulse shadow-[0_8px_20px_rgba(220,38,38,0.3)] hover:-translate-y-1 transition-all"
               >
-                STOP RECORDING
-              </button>
-            )}
-
-            <div className="text-sm font-medium text-slate-500 text-center bg-slate-50 p-4 rounded-xl border border-slate-100">
-              Auto-start enables at &gt;75% focus. Minimum 15 seconds required.
-            </div>
-
-            {deviceStatus.connected && !isRecording && !aiStage && (
-              <button 
-                onClick={() => setFocusScore(15)} 
-                className="mt-2 text-xs font-bold text-slate-400 hover:text-slate-600 uppercase tracking-wider flex items-center justify-center gap-1"
-                title="Simulate re-focusing a new slide"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                Restart Sweep
+                Stop & Analyze
               </button>
             )}
           </div>
 
-          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-            <h3 className="text-xl font-extrabold text-slate-800 border-b border-slate-100 pb-4 mb-6">Manual Fallback</h3>
+          <div className="bg-glass-panel p-8 rounded-[40px] border border-glass-panelBorder shadow-[0_24px_60px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.04)]">
+            <h3 className="text-xl font-black text-app-text border-b border-slate-200/50 pb-4 mb-6 tracking-tight">Import video file</h3>
             <button 
               onClick={handleManualUpload}
-              disabled={!!aiStage}
-              className="w-full py-4 border-2 border-dashed border-[#059669]/50 text-[#059669] font-bold text-lg rounded-xl hover:bg-[#ecfdf5] hover:border-[#059669] transition-all"
+              disabled={!!aiStage || !selectedRequestId}
+              className="w-full py-5 border-2 border-dashed border-emerald-500/40 text-emerald-600 font-extrabold text-lg rounded-2xl hover:bg-white hover:border-emerald-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Import Video File
+              Select file
             </button>
-            <p className="text-sm font-medium text-slate-500 mt-4 leading-relaxed">
-              For labs without a paired IRIS device yet. Accesses local file system only.
-            </p>
           </div>
         </div>
       </div>

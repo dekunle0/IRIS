@@ -21,13 +21,15 @@ CREATE TABLE users (
   id TEXT PRIMARY KEY,
   institution_id TEXT NOT NULL REFERENCES institutions(id),
   full_name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin','scientist_l2','scientist_l1','operator','viewer')),
+  role TEXT NOT NULL CHECK (role IN ('admin','pathologist','scientist_l2','scientist_l1','operator','viewer')),
   mlscn_number TEXT,
   mlscn_verified INTEGER NOT NULL DEFAULT 0,
   password_hash TEXT NOT NULL,
   totp_secret TEXT,
   two_fa_enabled INTEGER NOT NULL DEFAULT 0,
   last_active_at TEXT,
+  failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -130,7 +132,7 @@ CREATE INDEX idx_ai_results_capture ON ai_results(capture_id);
 
 CREATE TABLE results (
   id TEXT PRIMARY KEY,
-  test_request_id TEXT UNIQUE NOT NULL REFERENCES test_requests(id),
+  test_request_id TEXT NOT NULL REFERENCES test_requests(id),
   ai_result_id TEXT REFERENCES ai_results(id),
   patient_id TEXT NOT NULL REFERENCES patients(id),
   institution_id TEXT NOT NULL REFERENCES institutions(id),
@@ -248,3 +250,43 @@ CREATE TABLE notifications (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_notifications_user ON notifications(user_id, is_read);
+
+-- -----------------------------------------------------------------------------
+-- AUTOMATED SECURITY AUDIT TRIGGERS (Appended for Production Readiness)
+-- -----------------------------------------------------------------------------
+
+CREATE TRIGGER trg_audit_patients_insert
+AFTER INSERT ON patients
+BEGIN
+  INSERT INTO audit_log (user_id, institution_id, action, entity_type, entity_id)
+  VALUES (NEW.created_by, NEW.institution_id, 'create_patient', 'patient', NEW.id);
+END;
+
+CREATE TRIGGER trg_audit_results_insert
+AFTER INSERT ON results
+BEGIN
+  INSERT INTO audit_log (user_id, institution_id, action, entity_type, entity_id)
+  VALUES (
+    COALESCE(NEW.approved_by, (SELECT created_by FROM test_requests WHERE id = NEW.test_request_id)), 
+    NEW.institution_id, 'create_result', 'result', NEW.id
+  );
+END;
+
+CREATE TRIGGER trg_audit_results_release
+AFTER UPDATE OF status ON results
+WHEN NEW.status = 'released' AND OLD.status != 'released'
+BEGIN
+  INSERT INTO audit_log (user_id, institution_id, action, entity_type, entity_id)
+  VALUES (NEW.approved_by, NEW.institution_id, 'release_result', 'result', NEW.id);
+END;
+
+CREATE TRIGGER trg_results_immutable
+BEFORE UPDATE ON results
+WHEN OLD.status IN ('approved', 'released', 'amended')
+     AND (
+       NEW.edited_findings IS NOT OLD.edited_findings OR
+       NEW.interpretive_comment IS NOT OLD.interpretive_comment
+     )
+BEGIN
+  SELECT RAISE(ABORT, 'System of record violation: Approved results cannot be modified.');
+END;

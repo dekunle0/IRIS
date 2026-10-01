@@ -3,9 +3,20 @@
 import { useEffect, useState } from 'react';
 import { Download, Monitor, Apple, Terminal, ChevronDown, CheckCircle2, ShieldCheck } from 'lucide-react';
 
+type ReleaseData = {
+  version: string;
+  release_date: string;
+  release_notes: { version: string; notes: string }[];
+  builds: {
+    windows: { filename: string; size_mb: number; sha256: string; url: string };
+    mac: { filename: string; size_mb: number; sha256: string; url: string };
+    linux: { type: string; filename: string; size_mb: number; sha256: string; url: string }[];
+  }
+};
+
 export default function DownloadsPage() {
   const [activeTab, setActiveTab] = useState<'windows' | 'mac' | 'linux'>('windows');
-  const [releaseData, setReleaseData] = useState<any>(null);
+  const [releaseData, setReleaseData] = useState<ReleaseData | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -46,7 +57,7 @@ export default function DownloadsPage() {
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id as "windows" | "mac" | "linux")}
               className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold transition-all duration-200 ${
                 activeTab === tab.id 
                   ? 'bg-[#059669] text-white shadow-md' 
@@ -93,7 +104,7 @@ export default function DownloadsPage() {
               <h2 className="text-2xl font-black mb-2">Linux Distributions</h2>
               <p className="text-slate-500 mb-8 font-medium">Supported on Ubuntu 20.04+, Debian 11+, and Fedora 36+.</p>
               <div className="grid grid-cols-2 gap-4">
-                {releaseData.builds.linux.map((build: any) => (
+                {releaseData.builds.linux.map((build : { type: string; filename: string; size_mb: number; sha256: string; url: string }) => (
                   <button key={build.type} className="flex flex-col items-center justify-center p-6 border-2 border-[#059669]/20 rounded-2xl hover:bg-[#ecfdf5] hover:border-[#059669] transition-all group">
                     <span className="text-xl font-extrabold text-[#047857] group-hover:text-[#064E3B]">.{build.type}</span>
                     <span className="text-sm font-semibold text-slate-500 mt-2">{build.size_mb} MB</span>
@@ -127,7 +138,7 @@ export default function DownloadsPage() {
             </summary>
             <div className="p-6 pt-0 border-t border-slate-100 bg-slate-50">
               <div className="space-y-6">
-                {releaseData.release_notes.map((rn: any) => (
+                {releaseData.release_notes.map((rn: { version: string, notes: string }) => (
                   <div key={rn.version}>
                     <h4 className="font-extrabold text-[#059669] mb-1">Version {rn.version}</h4>
                     <p className="text-slate-600 font-medium text-sm leading-relaxed">{rn.notes}</p>

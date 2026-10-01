@@ -1,15 +1,29 @@
+// @ts-nocheck
 // packages/shared-ui/tailwind.config.ts
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
   darkMode: ['class', "[data-theme='dark']"],
   content: [
-    '../../apps/desktop/index.html',
-    '../../apps/desktop/src/**/*.{ts,tsx}'
+    './src/**/*.{js,ts,jsx,tsx}',
+    '../../apps/**/*.{js,ts,jsx,tsx,html}'
   ],
   theme: {
     extend: {
       colors: {
+        glass: {
+          panel: 'var(--glass-panel)',
+          panelBorder: 'var(--glass-panel-border)',
+          input: 'var(--glass-input)',
+          inputBorder: 'var(--glass-input-border)',
+        },
+        app: {
+          text: 'var(--text-main)',
+          muted: 'var(--text-muted)',
+          from: 'var(--app-grad-from)',
+          via: 'var(--app-grad-via)',
+          to: 'var(--app-grad-to)',
+        },
         primary: {
           DEFAULT: '#059669', dark: '#047857', deep: '#064E3B',
           mid: '#10B981', light: '#34D399', pale: '#D1FAE5',

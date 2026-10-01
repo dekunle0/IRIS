@@ -1,21 +1,24 @@
 {
-  "name": "@iris/lis-api",
-  "version": "1.1.0",
-  "private": true,
-  "main": "src/server.ts",
+  "name": "lis-api",
+  "version": "1.0.0",
+  "description": "LIS Integration API",
+  "main": "dist/server.js",
+  "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts"
+    "dev": "tsx src/server.ts",
+    "build": "tsup src/server.ts --format esm",
+    "start": "node dist/server.js"
   },
   "dependencies": {
-    "@fastify/bearer-auth": "^9.4.0",
-    "better-sqlite3": "^11.2.1",
-    "fastify": "^4.28.1"
+    "@fastify/bearer-auth": "^9.0.0",
+    "better-sqlite3-multiple-ciphers": "^9.1.1",
+    "fastify": "^4.26.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
-    "@types/node": "^22.5.4",
-    "tsx": "^4.19.0",
-    "typescript": "^5.5.3"
+    "@types/node": "^20.14.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.6.2"
   }
 }

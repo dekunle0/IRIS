@@ -1,155 +1,197 @@
-import { useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { useState, useEffect } from 'react';
+import { ConfirmModal } from './ConfirmModal';
 
 export function QCDashboard() {
-  // Realistic clinical mock data for Malaria Parasite Phase 1
-  const [kpis] = useState({
-    aiAgreementRate: 88.4,
-    totalAnalyses: 1245,
-    avgTurnaroundMin: 12.5,
-    totalCorrections: 144
+  const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', isDestructive: false, isAlert: false, onConfirm: () => {}, onCancel: () => {} });
+
+  const requestAlert = (title: string, message: string): Promise<void> => {
+    return new Promise((resolve) => {
+      setConfirmState({
+        isOpen: true, title, message, isDestructive: false, isAlert: true,
+        onConfirm: () => { setConfirmState(prev => ({ ...prev, isOpen: false })); resolve(); },
+        onCancel: () => { setConfirmState(prev => ({ ...prev, isOpen: false })); resolve(); }
+      });
+    });
+  };
+
+  const [stats, setStats] = useState({
+    totalAnalyses: 0,
+    totalCorrections: 0,
+    agreementRate: 100,
+    scientistWorkload: [] as any[],
+    chartData: [] as any[]
   });
+  const [isLoading, setIsLoading] = useState(true);
+  const [period, setPeriod] = useState('30d');
 
-  // Correction frequency by field (identifies where the AI needs retraining)
-  const [correctionData] = useState([
-    { field: 'Ring Stage', overrides: 68 },
-    { field: 'Trophozoite', overrides: 42 },
-    { field: 'Gametocyte', overrides: 18 },
-    { field: 'Uninfected RBC', overrides: 11 },
-    { field: 'Leukocyte (WBC)', overrides: 5 },
-  ]);
+  useEffect(() => {
+    const fetchQCStats = async () => {
+      try {
+        if (window.electron) {
+          const res = await window.electron.ipcRenderer.invoke('qc:getStats', { period });
+          if (res.success) setStats(res.data);
+        }
+      } catch (err) {
+        console.error("Failed to load QC stats:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchQCStats();
+    const intervalId = setInterval(fetchQCStats, 60000);
+    return () => clearInterval(intervalId);
+  }, [period]);
 
-  // Per-scientist workload and performance
-  const [workloadData] = useState([
-    { id: 'u1', name: 'Dr. Amina Bello', role: 'Scientist L2', analyses: 512, avgTime: '11.2m', correctionRate: '8.5%' },
-    { id: 'u2', name: 'Chukwudi Eze', role: 'Scientist L1', analyses: 489, avgTime: '14.1m', correctionRate: '12.2%' },
-    { id: 'u3', name: 'Dr. Sarah Ojo', role: 'Scientist L2', analyses: 244, avgTime: '10.8m', correctionRate: '7.9%' },
-  ]);
+  if (isLoading) {
+    return <div className="p-20 text-center text-app-muted font-bold text-xl animate-pulse">Loading QC dashboard...</div>;
+  }
 
-  const handleExport = () => {
-    alert("Generating local MLS-format QC Period Summary PDF for accreditation recordkeeping...");
+  const maxCorrections = Math.max(...stats.chartData.map(d => d.corrections), 1);
+
+  const handleExport = async () => {
+    if (!window.electron) return;
+    try {
+      const res = await window.electron.ipcRenderer.invoke('qc:exportSummary', { period });
+      if (!res.success && !res.canceled) {
+        await requestAlert('Export Failed', `Export failed: ${res.error}`);
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+    }
   };
 
   return (
-    <div className="max-w-7xl mx-auto w-full font-sans pb-10 flex flex-col h-full">
-      
-      {/* Header section matching PRD C.6 */}
-      <div className="flex justify-between items-end mb-8">
+    <div className="h-full flex flex-col font-sans pb-10 max-w-7xl mx-auto w-full">
+      <div className="mb-10 flex justify-between items-end animate-slide-up">
         <div>
-          <h1 className="text-4xl font-extrabold text-slate-800 tracking-tight">Quality Control</h1>
-          <p className="text-lg text-slate-500 mt-2 font-medium">Local AI performance and laboratory workload analytics.</p>
+          <h1 className="text-3xl font-extrabold text-app-text tracking-tight">QC Dashboard</h1>
+          <p className="text-base text-app-muted mt-1 font-medium">AI performance and lab workload.</p>
         </div>
-        <div className="flex gap-4">
-          <select className="px-4 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl shadow-sm outline-none focus:ring-2 focus:ring-[#059669]">
-            <option>Last 30 Days</option>
-            <option>Last 7 Days</option>
-            <option>This Quarter</option>
+        <div className="flex gap-3">
+          <select 
+            value={period} 
+            onChange={(e) => setPeriod(e.target.value)}
+            className="px-4 py-2.5 bg-glass-input backdrop-blur-sm border border-glass-inputBorder text-app-text font-bold rounded-xl outline-none shadow-sm cursor-pointer"
+          >
+            <option value="7d">Last 7 Days</option>
+            <option value="30d">Last 30 Days</option>
+            <option value="all">All Time</option>
           </select>
-          <button onClick={handleExport} className="px-6 py-3 bg-[#059669] text-white font-bold rounded-xl shadow-sm hover:bg-[#047857] transition-colors flex items-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            Export Period Summary
+          <button 
+            onClick={handleExport}
+            className="px-5 py-2.5 bg-glass-input backdrop-blur-sm border border-glass-inputBorder text-app-text font-bold rounded-xl hover:bg-glass-panel hover:shadow-sm transition-all duration-200 flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Export CSV
           </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-6 mb-8">
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-          <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">AI Agreement Rate</div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-black text-slate-800">{kpis.aiAgreementRate}%</span>
+      {/* Premium KPI Cards */}
+      <div className="grid grid-cols-3 gap-8 mb-10 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+        <div className="bg-glass-panel backdrop-blur-3xl border border-glass-panelBorder rounded-[40px] shadow-[0_24px_60px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.04)] p-8  flex flex-col justify-between">
+          <h3 className="text-[11px] font-bold text-app-muted uppercase tracking-widest mb-4 ml-1">AI Agreement Rate</h3>
+          <div>
+            <div className="text-6xl font-black text-app-text mb-2 tracking-tighter">{stats.agreementRate}%</div>
+            <p className={`text-sm font-bold ${stats.agreementRate > 90 ? 'text-emerald-600' : 'text-amber-500'}`}>
+              {stats.totalCorrections === 0 ? 'No manual corrections needed' : 'Actionable deviations recorded'}
+            </p>
           </div>
-          <div className="text-sm font-semibold text-[#059669] mt-2">No manual corrections needed</div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-          <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Total Analyses</div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-black text-slate-800">{kpis.totalAnalyses}</span>
+        <div className="bg-glass-panel backdrop-blur-3xl border border-glass-panelBorder rounded-[40px] shadow-[0_24px_60px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.04)] p-8  flex flex-col justify-between">
+          <h3 className="text-[11px] font-bold text-app-muted uppercase tracking-widest mb-4 ml-1">Total Analyses</h3>
+          <div>
+            <div className="text-6xl font-black text-app-text mb-2 tracking-tighter">{stats.totalAnalyses}</div>
+            <p className="text-sm font-bold text-app-muted">Approved results in database</p>
           </div>
-          <div className="text-sm font-semibold text-slate-500 mt-2">Approved results in period</div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-          <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Avg Turnaround</div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-black text-slate-800">{kpis.avgTurnaroundMin}</span>
-            <span className="text-lg font-bold text-slate-500">mins</span>
+        <div className="bg-glass-panel backdrop-blur-3xl border border-glass-panelBorder rounded-[40px] shadow-[0_24px_60px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.04)] p-8  flex flex-col justify-between">
+          <h3 className="text-[11px] font-bold text-app-muted uppercase tracking-widest mb-4 ml-1">Total Corrections</h3>
+          <div>
+            <div className="text-6xl font-black text-app-text mb-2 tracking-tighter">{stats.totalCorrections}</div>
+            <p className="text-sm font-bold text-rose-600">AI findings manually overridden</p>
           </div>
-          <div className="text-sm font-semibold text-slate-500 mt-2">Capture to Final Approval</div>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
-          <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Total Corrections</div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-black text-slate-800">{kpis.totalCorrections}</span>
-          </div>
-          <div className="text-sm font-semibold text-warning mt-2">AI findings overridden</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-8 mb-8 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 flex-1 animate-slide-up" style={{ animationDelay: '0.2s' }}>
         
-        {/* Correction Frequency Chart */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm flex flex-col">
-          <div className="mb-6">
-            <h2 className="text-xl font-extrabold text-slate-800">Correction Frequency by Field</h2>
-            <p className="text-sm text-slate-500 font-medium">Which AI classifications get overridden most (Retraining targets)</p>
+        {/* The Chart */}
+        <div className="bg-glass-panel backdrop-blur-3xl border border-glass-panelBorder rounded-[40px] shadow-[0_24px_60px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.04)] p-10  flex flex-col">
+          <div className="mb-8 border-b border-slate-100 pb-5">
+            <h3 className="text-2xl font-black text-app-text tracking-tight">Override frequency</h3>
+            <p className="text-sm text-app-muted font-medium mt-1">Most overridden AI results</p>
           </div>
-          <div className="flex-1 w-full min-h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={correctionData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                <XAxis type="number" stroke="#94a3b8" fontSize={12} fontWeight={600} />
-                <YAxis dataKey="field" type="category" stroke="#64748b" fontSize={13} fontWeight={700} width={120} />
-                <Tooltip 
-                  cursor={{fill: '#f1f5f9'}}
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                />
-                <Bar dataKey="overrides" radius={[0, 6, 6, 0]}>
-                  {correctionData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={index === 0 ? '#DC2626' : index === 1 ? '#D97706' : '#059669'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          
+          <div className="flex-1 flex flex-col justify-center space-y-10 px-2">
+            {stats.chartData.length === 0 ? (
+              <div className="text-center text-app-muted font-bold">No test data available yet.</div>
+            ) : (
+              stats.chartData.map((item, index) => {
+                const widthPct = (item.corrections / maxCorrections) * 100;
+                const barColor = index % 2 === 0 ? 'bg-amber-500' : 'bg-rose-500'; 
+                
+                return (
+                  <div key={index} className="w-full">
+                    <div className="flex justify-between text-sm font-bold text-app-text mb-3">
+                      <span>{item.name}</span>
+                      <span className="text-app-muted">{item.corrections} overrides</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-5 overflow-hidden border border-slate-200 shadow-inner">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-1000 ease-out shadow-sm ${widthPct > 0 ? barColor : 'bg-transparent'}`} 
+                        style={{ width: `${widthPct}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
-        {/* Scientist Workload Table */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm flex flex-col overflow-hidden">
-          <div className="mb-6">
-            <h2 className="text-xl font-extrabold text-slate-800">Reviewer Workload & Performance</h2>
-            <p className="text-sm text-slate-500 font-medium">Per-scientist metrics</p>
+        {/* The Workload Table */}
+        <div className="bg-glass-panel backdrop-blur-3xl border border-glass-panelBorder rounded-[40px] shadow-[0_24px_60px_rgba(0,0,0,0.08),0_4px_16px_rgba(0,0,0,0.04)] p-10  flex flex-col">
+          <div className="mb-6 border-b border-slate-100 pb-5">
+            <h3 className="text-2xl font-black text-app-text tracking-tight">Scientist output</h3>
+            <p className="text-sm text-app-muted font-medium mt-1">Lab workload and sign-offs</p>
           </div>
-          <div className="overflow-auto">
+          
+          <div className="overflow-y-auto flex-1">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-widest border-b border-slate-200">
-                  <th className="px-4 py-3 rounded-tl-xl">Scientist</th>
-                  <th className="px-4 py-3">Analyses</th>
-                  <th className="px-4 py-3">Avg Turnaround</th>
-                  <th className="px-4 py-3 rounded-tr-xl">Correction Rate</th>
+                <tr className="text-app-muted text-[11px] font-bold uppercase tracking-widest border-b border-slate-100 bg-slate-50/50">
+                  <th className="py-5 px-6 rounded-tl-xl">Scientist</th>
+                  <th className="py-5 px-6 text-right rounded-tr-xl">Total Analyses</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {workloadData.map((user) => (
-                  <tr key={user.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-4">
-                      <div className="font-extrabold text-slate-800">{user.name}</div>
-                      <div className="text-xs font-bold text-slate-400 mt-0.5">{user.role}</div>
+              <tbody className="divide-y divide-slate-50">
+                {stats.scientistWorkload.map((sw: any, i: number) => (
+                  <tr key={i} className="hover:bg-slate-50 transition-colors">
+                    <td className="py-6 px-6">
+                      <div className="font-extrabold text-app-text text-lg">{sw.name}</div>
+                      <div className="text-[11px] font-bold text-app-muted uppercase tracking-widest mt-1">
+                        {sw.role === 'admin' ? 'Administrator' : sw.role.replace('_', ' ')}
+                      </div>
                     </td>
-                    <td className="px-4 py-4 font-bold text-slate-700">{user.analyses}</td>
-                    <td className="px-4 py-4 font-bold text-slate-700">{user.avgTime}</td>
-                    <td className="px-4 py-4 font-bold text-[#059669]">{user.correctionRate}</td>
+                    <td className="py-6 px-6 font-black text-app-muted text-right text-xl">{sw.analyses}</td>
                   </tr>
                 ))}
+                {stats.scientistWorkload.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="py-12 text-center text-app-muted font-bold">No active scientists found.</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
-
+        
       </div>
+      <ConfirmModal {...confirmState} />
     </div>
   );
 }

@@ -1,9 +1,19 @@
 // apps/desktop/src/main/preload.ts
 import { contextBridge, ipcRenderer } from 'electron';
 
-// This safely exposes the exact IPC methods React is allowed to call
+let sessionToken = '';
+
 contextBridge.exposeInMainWorld('electron', {
+  setAuthToken: (token: string) => { sessionToken = token; },
   ipcRenderer: {
-    invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+    invoke: (channel: string, ...args: any[]) => {
+      const validChannels = [
+        'auth:', 'users:', 'patients:', 'worklist:', 'qc:', 'ai:', 'results:', 'devices:', 'system:', 'dialog:', 'clipboard:', 'shell:'
+      ];
+      if (!validChannels.some(prefix => channel.startsWith(prefix))) {
+        throw new Error(`IPC channel "${channel}" is not allowed.`);
+      }
+      return ipcRenderer.invoke(channel, ...args, { __token: sessionToken });
+    },
   },
 });

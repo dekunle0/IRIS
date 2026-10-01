@@ -1,0 +1,39 @@
+appId: io.kytolabx.iris
+productName: IRIS
+directories:
+  buildResources: build
+  output: release
+files:
+  - "dist/**/*"
+  - "dist-electron/**/*"
+  - "build/**/*"
+  - "package.json"
+asarUnpack:
+  - "**/*.node"
+extraResources:
+  - from: "ai-service-dist"
+    to: "ai-service"
+    filter:
+      - "iris-ai-service*"
+  - from: "../../packages/db/migrations/001_init.sql"
+    to: "001_init.sql"
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: IRIS
+  uninstallDisplayName: Uninstall IRIS
+win:
+  target: nsis
+mac:
+  target: dmg
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+linux:
+  target:
+    - AppImage
+    - deb
+afterSign: build/afterSign.js

@@ -21,27 +21,50 @@ export class IRISClient {
   }
 
   private async request(method: string, endpoint: string, body?: any) {
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${this.localToken}`
+    };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+
     const res = await fetch(`${this.baseUrl}${endpoint}`, {
       method,
-      headers: {
-        'Authorization': `Bearer ${this.localToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: body ? JSON.stringify(body) : undefined
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new IRISError(data);
-    return data;
+    if (!res.ok) {
+      const text = await res.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(text);
+      } catch (e) {
+        errorData = { type: 'http_error', title: `HTTP Error ${res.status}`, detail: text };
+      }
+      throw new IRISError(errorData);
+    }
+    return res.json();
   }
 
   public patients = {
-    sync: (payload: { externalPatientId: string; name: string; dob: string; gender: string; testRequests: Array<{testType: string}> }) => 
+    sync: (payload: { externalPatientId: string; name: string; dob: string; gender: string; testRequests: Array<{testName: string, testCategory?: string}>, sampleType?: string, requestingClinician?: string, clinicalNotes?: string }) => 
       this.request('POST', '/v1/patients/sync', payload)
   };
 
   public results = {
     list: (externalPatientId: string) => 
-      this.request('GET', `/v1/results/${externalPatientId}`)
+      this.request('GET', `/v1/results/${externalPatientId}`),
+    getFHIR: (externalPatientId: string) =>
+      this.request('GET', `/v1/results/${externalPatientId}/fhir`)
+  };
+
+  public webhooks = {
+    register: (payload: { url: string; events: string[] }) =>
+      this.request('POST', '/v1/webhooks', payload),
+    list: () =>
+      this.request('GET', '/v1/webhooks'),
+    delete: (webhookId: string) =>
+      this.request('DELETE', `/v1/webhooks/${webhookId}`)
   };
 }
